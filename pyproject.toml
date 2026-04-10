@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "blender-mcp"
+version = "1.0.0"
+description = "MCP server that connects GitHub Copilot to Blender via the Model Context Protocol"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "GH-Copilot-Blender" }]
+keywords = ["blender", "mcp", "model-context-protocol", "github-copilot", "ai"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+blender-mcp = "blender_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/blender_mcp"]
