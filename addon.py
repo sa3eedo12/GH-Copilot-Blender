@@ -1200,6 +1200,41 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
 
         layout.separator()
 
+        # --- Input ---
+        input_box = layout.box()
+        input_box.label(text="Prompt:", icon="EDITMODE_HLT")
+
+        # Auto-create a default text block on first use
+        if props.prompt_text is None:
+            text_block = bpy.data.texts.get(_PROMPT_TEXT_NAME)
+            if text_block is None:
+                text_block = bpy.data.texts.new(_PROMPT_TEXT_NAME)
+            props.prompt_text = text_block
+
+        # Selector row: lets users create, open, or switch text blocks
+        input_box.template_ID(props, "prompt_text", new="text.new", open="text.open")
+        input_box.label(text="Edit prompt in the Text Editor", icon="INFO")
+
+        # Token count estimate (heuristic: ~4 chars per token, varies for
+        # non-English text and code but gives a useful order-of-magnitude)
+        message_text = _get_prompt_message(props)
+        estimated_tokens = max(1, len(message_text) // 4)
+        max_tokens = MODEL_TOKEN_LIMITS.get(props.model, _DEFAULT_TOKEN_LIMIT)
+        input_box.label(
+            text=f"~{estimated_tokens:,} / {max_tokens:,} tokens",
+            icon="INFO",
+        )
+
+        send_row = layout.row(align=True)
+        send_row.enabled = not _chat_busy
+        send_row.operator("blendermcp.send_chat", icon="PLAY")
+        send_row.operator("blendermcp.clear_chat", icon="TRASH")
+
+        if _chat_busy:
+            layout.label(text="Thinking\u2026", icon="SORTTIME")
+
+        layout.separator()
+
         # --- Chat history ---
         chat_box = layout.box()
         if not _chat_messages:
@@ -1232,44 +1267,6 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
                         col.separator()
 
                 col.separator()
-
-        if _chat_busy:
-            layout.label(text="Thinking\u2026", icon="SORTTIME")
-
-        layout.separator()
-
-        # --- Input ---
-        input_box = layout.box()
-        input_box.label(text="Prompt:", icon="EDITMODE_HLT")
-
-        # Auto-create a default text block on first use
-        if props.prompt_text is None:
-            text_block = bpy.data.texts.get(_PROMPT_TEXT_NAME)
-            if text_block is None:
-                text_block = bpy.data.texts.new(_PROMPT_TEXT_NAME)
-            props.prompt_text = text_block
-
-        # Selector row: lets users create, open, or switch text blocks
-        input_box.template_ID(props, "prompt_text", new="text.new", open="text.open")
-        input_box.label(text="Edit prompt in the Text Editor", icon="INFO")
-
-        # Token count estimate (heuristic: ~4 chars per token, varies for
-        # non-English text and code but gives a useful order-of-magnitude)
-        message_text = _get_prompt_message(props)
-        estimated_tokens = max(1, len(message_text) // 4)
-        max_tokens = MODEL_TOKEN_LIMITS.get(props.model, _DEFAULT_TOKEN_LIMIT)
-        input_box.label(
-            text=f"~{estimated_tokens:,} / {max_tokens:,} tokens",
-            icon="INFO",
-        )
-
-        send_row = layout.row(align=True)
-        send_row.enabled = not _chat_busy
-        send_row.operator("blendermcp.send_chat", icon="PLAY")
-
-        row = layout.row()
-        row.enabled = not _chat_busy
-        row.operator("blendermcp.clear_chat", icon="TRASH")
 
 
 # ---------------------------------------------------------------------------
