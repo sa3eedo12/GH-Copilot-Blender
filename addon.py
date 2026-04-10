@@ -552,6 +552,21 @@ GH_OAUTH_CLIENT_ID: str = "Ov23lij4URGHUWRkizTj"
 _chat_messages: list[dict] = []
 _chat_busy: bool = False
 
+# ---- Chat input text block ------------------------------------------------
+
+_CHAT_INPUT_TEXT_NAME = "BlenderMCP_ChatInput"
+_PREVIEW_WRAP_WIDTH = 45
+_MAX_PREVIEW_LINES = 10
+
+
+def _get_chat_input_text() -> "bpy.types.Text":
+    """Return (or create) the internal Text data-block used for chat input."""
+    txt = bpy.data.texts.get(_CHAT_INPUT_TEXT_NAME)
+    if txt is None:
+        txt = bpy.data.texts.new(_CHAT_INPUT_TEXT_NAME)
+        txt.use_fake_user = True  # prevent garbage collection
+    return txt
+
 # ---- GitHub OAuth Device Flow state (module-level) -----------------------
 
 _gh_device_code: str = ""
@@ -985,12 +1000,13 @@ class BLENDERMCP_OT_SendChat(bpy.types.Operator):
             )
             return {"CANCELLED"}
 
-        message = props.user_message.strip()
+        txt = _get_chat_input_text()
+        message = txt.as_string().strip()
         if not message:
             return {"CANCELLED"}
 
         _chat_messages.append({"role": "user", "content": message})
-        props.user_message = ""
+        txt.clear()
         _chat_busy = True
 
         t = threading.Thread(
@@ -1018,6 +1034,35 @@ class BLENDERMCP_OT_ClearChat(bpy.types.Operator):
 
     def execute(self, context):
         _chat_messages.clear()
+        return {"FINISHED"}
+
+
+class BLENDERMCP_OT_OpenPromptEditor(bpy.types.Operator):
+    bl_idname = "blendermcp.open_prompt_editor"
+    bl_label = "Edit Prompt"
+    bl_description = "Open a text editor window to write your multi-line prompt"
+
+    def execute(self, context):
+        txt = _get_chat_input_text()
+
+        # Record existing windows, open a new one, then find the added window
+        existing_windows = set(context.window_manager.windows)
+        bpy.ops.wm.window_new()
+        new_windows = [
+            w for w in context.window_manager.windows
+            if w not in existing_windows
+        ]
+        if not new_windows:
+            # Fallback: use the last window if detection failed
+            new_window = context.window_manager.windows[-1]
+        else:
+            new_window = new_windows[0]
+
+        new_area = new_window.screen.areas[0]
+        new_area.type = "TEXT_EDITOR"
+        space = new_area.spaces.active
+        space.text = txt
+
         return {"FINISHED"}
 
 
@@ -1214,18 +1259,38 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
         layout.separator()
 
         # --- Input ---
-        msg_col = layout.column(align=True)
-        msg_col.scale_y = 2.5
-        msg_col.prop(props, "user_message", text="")
+        txt = _get_chat_input_text()
+        message_text = txt.as_string()
+
+        input_box = layout.box()
+        input_box.label(text="Prompt:", icon="EDITMODE_HLT")
+
+        # Preview of current text (up to _MAX_PREVIEW_LINES lines)
+        if message_text.strip():
+            preview_col = input_box.column(align=True)
+            lines = message_text.split("\n")
+            for line in lines[:_MAX_PREVIEW_LINES]:
+                stripped = line.rstrip()
+                if stripped:
+                    for wrapped in textwrap.wrap(stripped, width=_PREVIEW_WRAP_WIDTH):
+                        preview_col.label(text=f"  {wrapped}")
+                else:
+                    preview_col.label(text="")
+            if len(lines) > _MAX_PREVIEW_LINES:
+                preview_col.label(text="  …")
+        else:
+            input_box.label(text="(empty — click Edit Prompt to type)")
 
         # Token count estimate (heuristic: ~4 chars per token, varies for
         # non-English text and code but gives a useful order-of-magnitude)
-        estimated_tokens = max(1, len(props.user_message) // 4)
+        estimated_tokens = max(1, len(message_text) // 4)
         max_tokens = MODEL_TOKEN_LIMITS.get(props.model, _DEFAULT_TOKEN_LIMIT)
-        layout.label(
+        input_box.label(
             text=f"~{estimated_tokens:,} / {max_tokens:,} tokens",
             icon="INFO",
         )
+
+        input_box.operator("blendermcp.open_prompt_editor", icon="TEXT")
 
         send_row = layout.row(align=True)
         send_row.enabled = not _chat_busy
@@ -1247,6 +1312,7 @@ _classes = (
     BLENDERMCP_OT_StopServer,
     BLENDERMCP_OT_SendChat,
     BLENDERMCP_OT_ClearChat,
+    BLENDERMCP_OT_OpenPromptEditor,
     BLENDERMCP_OT_GitHubLogin,
     BLENDERMCP_OT_GitHubLogout,
     BLENDERMCP_PT_Panel,
