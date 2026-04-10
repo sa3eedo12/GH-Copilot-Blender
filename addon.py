@@ -434,6 +434,23 @@ _DEFAULT_SYSTEM_PROMPT = (
     "- Be concise in your responses."
 )
 
+# Maximum context-window sizes (in tokens) per model
+MODEL_TOKEN_LIMITS: dict[str, int] = {
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "gpt-4.1": 128000,
+    "gpt-4.1-mini": 128000,
+    "gpt-4.1-nano": 128000,
+    "o3-mini": 200000,
+    "claude-opus-4.6": 200000,
+    "claude-sonnet-4.6": 200000,
+    "claude-opus-4.5": 200000,
+    "claude-sonnet-4.5": 200000,
+    "claude-haiku-4.5": 200000,
+    "DeepSeek-R1": 64000,
+}
+_DEFAULT_TOKEN_LIMIT = 128000  # fallback for models not in MODEL_TOKEN_LIMITS
+
 # OpenAI-compatible function-calling tool definitions (mirrors the MCP tools)
 _CHAT_TOOL_DEFS: list[dict] = [
     {
@@ -580,14 +597,21 @@ def _call_chat_api(
     messages: list[dict],
     tools: list[dict],
 ) -> dict:
-    """Call an OpenAI-compatible ``/chat/completions`` endpoint."""
+    """Call an OpenAI-compatible ``/chat/completions`` endpoint.
+
+    Claude models served via the GitHub Models inference endpoint do not
+    accept the ``temperature`` parameter in the same way as OpenAI models,
+    so it is omitted for any model whose name starts with ``"claude"``.
+    """
     url = f"{api_base.rstrip('/')}/chat/completions"
-    payload = {
+    is_claude = model.lower().startswith("claude")
+    payload: dict = {
         "model": model,
         "messages": messages,
         "tools": tools,
-        "temperature": 0.7,
     }
+    if not is_claude:
+        payload["temperature"] = 0.7
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -599,8 +623,18 @@ def _call_chat_api(
         method="POST",
     )
     ctx = ssl.create_default_context()
-    with urllib.request.urlopen(req, context=ctx, timeout=120) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=120) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"API request failed ({exc.code} {exc.reason}): {body}"
+        ) from exc
 
 
 def _schedule_redraw() -> None:
@@ -898,21 +932,18 @@ class BlenderMCPChatProperties(bpy.types.PropertyGroup):
         name="Model",
         description="Model to use for chat completions",
         items=[
-            ("gpt-4o", "gpt-4o", "GPT-4o"),
-            ("gpt-4o-mini", "gpt-4o-mini", "GPT-4o Mini"),
-            ("gpt-4.1", "gpt-4.1", "GPT-4.1"),
-            ("gpt-4.1-mini", "gpt-4.1-mini", "GPT-4.1 Mini"),
-            ("gpt-4.1-nano", "gpt-4.1-nano", "GPT-4.1 Nano"),
-            ("o3-mini", "o3-mini", "o3-mini"),
-            ("o1", "o1", "o1"),
-            ("o1-mini", "o1-mini", "o1-mini"),
-            ("DeepSeek-R1", "DeepSeek-R1", "DeepSeek R1"),
-            ("claude-opus-4-5", "claude-opus-4-5", "Claude Opus 4.5"),
-            ("claude-sonnet-4-5", "claude-sonnet-4-5", "Claude Sonnet 4.5"),
-            ("claude-3-7-sonnet", "claude-3-7-sonnet", "Claude 3.7 Sonnet"),
-            ("claude-3-5-sonnet", "claude-3-5-sonnet", "Claude 3.5 Sonnet"),
-            ("claude-3-5-haiku", "claude-3-5-haiku", "Claude 3.5 Haiku"),
-            ("claude-3-opus", "claude-3-opus", "Claude 3 Opus"),
+            ("gpt-4o", "gpt-4o", "GPT-4o (128K context)"),
+            ("gpt-4o-mini", "gpt-4o-mini", "GPT-4o Mini (128K context)"),
+            ("gpt-4.1", "gpt-4.1", "GPT-4.1 (128K context)"),
+            ("gpt-4.1-mini", "gpt-4.1-mini", "GPT-4.1 Mini (128K context)"),
+            ("gpt-4.1-nano", "gpt-4.1-nano", "GPT-4.1 Nano (128K context)"),
+            ("o3-mini", "o3-mini", "o3-mini (200K context)"),
+            ("claude-opus-4.6", "claude-opus-4.6", "Claude Opus 4.6 (200K context)"),
+            ("claude-sonnet-4.6", "claude-sonnet-4.6", "Claude Sonnet 4.6 (200K context)"),
+            ("claude-opus-4.5", "claude-opus-4.5", "Claude Opus 4.5 (200K context)"),
+            ("claude-sonnet-4.5", "claude-sonnet-4.5", "Claude Sonnet 4.5 (200K context)"),
+            ("claude-haiku-4.5", "claude-haiku-4.5", "Claude Haiku 4.5 (200K context)"),
+            ("DeepSeek-R1", "DeepSeek-R1", "DeepSeek R1 (64K context)"),
         ],
         default="gpt-4o",
     )
@@ -1183,11 +1214,22 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
         layout.separator()
 
         # --- Input ---
-        row = layout.row(align=True)
-        row.prop(props, "user_message", text="")
-        sub = row.row(align=True)
-        sub.enabled = not _chat_busy
-        sub.operator("blendermcp.send_chat", text="", icon="PLAY")
+        msg_col = layout.column(align=True)
+        msg_col.scale_y = 2.5
+        msg_col.prop(props, "user_message", text="")
+
+        # Token count estimate (heuristic: ~4 chars per token, varies for
+        # non-English text and code but gives a useful order-of-magnitude)
+        estimated_tokens = max(1, len(props.user_message) // 4)
+        max_tokens = MODEL_TOKEN_LIMITS.get(props.model, _DEFAULT_TOKEN_LIMIT)
+        layout.label(
+            text=f"~{estimated_tokens:,} / {max_tokens:,} tokens",
+            icon="INFO",
+        )
+
+        send_row = layout.row(align=True)
+        send_row.enabled = not _chat_busy
+        send_row.operator("blendermcp.send_chat", icon="PLAY")
 
         row = layout.row()
         row.enabled = not _chat_busy
