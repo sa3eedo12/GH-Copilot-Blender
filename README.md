@@ -17,14 +17,14 @@ You can interact with the AI in **two ways**:
 ### Option A — Built-in AI Chat (recommended, no VS Code needed)
 
 ```
-Blender addon  ──(HTTPS / OpenAI-compatible API)──►  AI provider
-  (addon.py)                                         (GitHub Models, OpenAI, etc.)
+Blender addon  ──(HTTPS / OpenAI-compatible API)──►  GitHub Models
+  (addon.py)                                         (models.inference.ai.azure.com)
 ```
 
 The addon includes an **AI Chat** panel in the 3D Viewport sidebar.
-You configure an API key and endpoint, then chat with the AI directly inside
-Blender.  The AI can call the same tools (scene info, object info, execute code,
-screenshot) without any external processes.
+Sign in with GitHub once and select a model from the dropdown — no API keys or
+URLs to configure.  The AI can call the same tools (scene info, object info,
+execute code, screenshot) without any external processes.
 
 ### Option B — VS Code + MCP
 
@@ -49,10 +49,7 @@ GitHub Copilot  ──(MCP / stdio)──►  blender-mcp server  ──(TCP / J
 | Tool | Version |
 |------|---------|
 | Blender | 3.0 or newer |
-| An OpenAI-compatible API key | — |
-
-Supported providers: **GitHub Models**, **OpenAI**, **Azure OpenAI**, or any
-service with an OpenAI-compatible `/chat/completions` endpoint.
+| A GitHub account with GitHub Models access | — |
 
 ### VS Code + MCP (Option B)
 
@@ -103,15 +100,12 @@ You should see *"Running on localhost:9876"* in the panel.
 
 1. In the 3D Viewport sidebar (**N**), select the **BlenderMCP** tab.
 2. Expand the **AI Chat** panel.
-3. Open **API Settings** and fill in:
-   - **API Base URL** — for GitHub Models use
-     `https://models.inference.ai.azure.com`, for OpenAI use
-     `https://api.openai.com/v1`.
-   - **API Key** — your GitHub personal access token (for GitHub Models) or
-     OpenAI API key.
-   - **Model** — e.g. `gpt-4o`.
-4. Type a message in the text field and click ▶ (Send).
-5. The AI assistant can inspect your scene, create objects, run code, and take
+3. Click **"Sign in with GitHub"** and follow the on-screen instructions
+   (you'll visit a GitHub URL to enter a short device code).
+4. Once signed in, open **API Settings** and choose your preferred **Model**
+   from the dropdown (defaults to `gpt-4o`).
+5. Type a message in the text field and click ▶ (Send).
+6. The AI assistant can inspect your scene, create objects, run code, and take
    screenshots — all directly inside Blender.
 
 ### 4 – Configure VS Code (Option B)

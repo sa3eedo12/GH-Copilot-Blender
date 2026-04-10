@@ -23,7 +23,7 @@ import webbrowser
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
 # ---------------------------------------------------------------------------
 # Addon metadata
@@ -882,9 +882,20 @@ class BlenderMCPChatProperties(bpy.types.PropertyGroup):
         description="API key or token (e.g. your GitHub personal access token)",
         subtype="PASSWORD",
     )
-    model: StringProperty(  # type: ignore[assignment]
+    model: EnumProperty(  # type: ignore[assignment]
         name="Model",
-        description="Model identifier to use for chat completions",
+        description="Model to use for chat completions",
+        items=[
+            ("gpt-4o", "gpt-4o", "GPT-4o"),
+            ("gpt-4o-mini", "gpt-4o-mini", "GPT-4o Mini"),
+            ("gpt-4.1", "gpt-4.1", "GPT-4.1"),
+            ("gpt-4.1-mini", "gpt-4.1-mini", "GPT-4.1 Mini"),
+            ("gpt-4.1-nano", "gpt-4.1-nano", "GPT-4.1 Nano"),
+            ("o3-mini", "o3-mini", "o3-mini"),
+            ("o1", "o1", "o1"),
+            ("o1-mini", "o1-mini", "o1-mini"),
+            ("DeepSeek-R1", "DeepSeek-R1", "DeepSeek R1"),
+        ],
         default="gpt-4o",
     )
     system_prompt: StringProperty(  # type: ignore[assignment]
@@ -979,7 +990,7 @@ class BLENDERMCP_OT_GitHubLogin(bpy.types.Operator):
 
         # Step 1: Request device & user codes
         payload = urllib.parse.urlencode(
-            {"client_id": GH_OAUTH_CLIENT_ID, "scope": "user"}
+            {"client_id": GH_OAUTH_CLIENT_ID, "scope": "models"}
         ).encode("utf-8")
         req = urllib.request.Request(
             "https://github.com/login/device/code",
@@ -1101,11 +1112,6 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
 
         if props.show_settings:
             col = box.column(align=True)
-            col.prop(props, "api_base")
-            # De-emphasise manual key field when signed in via GitHub
-            key_row = col.row()
-            key_row.enabled = not _gh_logged_in
-            key_row.prop(props, "api_key")
             col.prop(props, "model")
 
         layout.separator()
