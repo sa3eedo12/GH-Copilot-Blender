@@ -21,7 +21,7 @@ Blender addon  ──(HTTPS / OpenAI-compatible API)──►  AI provider
   (addon.py)                                         (GitHub Models, OpenAI, etc.)
 ```
 
-The addon includes a **AI Chat** panel in the 3D Viewport sidebar.
+The addon includes an **AI Chat** panel in the 3D Viewport sidebar.
 You configure an API key and endpoint, then chat with the AI directly inside
 Blender.  The AI can call the same tools (scene info, object info, execute code,
 screenshot) without any external processes.
