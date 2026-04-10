@@ -23,7 +23,7 @@ import webbrowser
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty, StringProperty
 
 # ---------------------------------------------------------------------------
 # Addon metadata
@@ -912,6 +912,23 @@ def _gh_poll_thread(
 
 # ---- Chat properties ------------------------------------------------------
 
+_PROMPT_TEXT_NAME = "BlenderMCP_Prompt"
+
+
+def _get_prompt_message(props) -> str:
+    """Return the current prompt text from the text block or user_message fallback."""
+    if props.prompt_text is not None:
+        return props.prompt_text.as_string().strip()
+    return props.user_message.strip()
+
+
+def _clear_prompt(props) -> None:
+    """Clear the current prompt text block (or user_message fallback)."""
+    if props.prompt_text is not None:
+        props.prompt_text.clear()
+    else:
+        props.user_message = ""
+
 
 class BlenderMCPChatProperties(bpy.types.PropertyGroup):
     api_base: StringProperty(  # type: ignore[assignment]
@@ -955,7 +972,14 @@ class BlenderMCPChatProperties(bpy.types.PropertyGroup):
     user_message: StringProperty(  # type: ignore[assignment]
         name="Message",
         description="Type your message to the AI assistant",
-        multiline=True,
+    )
+    prompt_text: PointerProperty(  # type: ignore[assignment]
+        name="Prompt",
+        type=bpy.types.Text,
+        description=(
+            "Text block for multi-line prompt input. "
+            "Edit the selected text block in the Text Editor."
+        ),
     )
     show_settings: BoolProperty(  # type: ignore[assignment]
         name="Show Settings",
@@ -986,12 +1010,12 @@ class BLENDERMCP_OT_SendChat(bpy.types.Operator):
             )
             return {"CANCELLED"}
 
-        message = props.user_message.strip()
+        message = _get_prompt_message(props)
         if not message:
             return {"CANCELLED"}
 
         _chat_messages.append({"role": "user", "content": message})
-        props.user_message = ""
+        _clear_prompt(props)
         _chat_busy = True
 
         t = threading.Thread(
@@ -1218,12 +1242,20 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
         input_box = layout.box()
         input_box.label(text="Prompt:", icon="EDITMODE_HLT")
 
-        # Inline editable text field
-        input_box.prop(props, "user_message", text="")
+        # Auto-create a default text block on first use
+        if props.prompt_text is None:
+            text_block = bpy.data.texts.get(_PROMPT_TEXT_NAME)
+            if text_block is None:
+                text_block = bpy.data.texts.new(_PROMPT_TEXT_NAME)
+            props.prompt_text = text_block
+
+        # Selector row: lets users create, open, or switch text blocks
+        input_box.template_ID(props, "prompt_text", new="text.new", open="text.open")
+        input_box.label(text="Edit prompt in the Text Editor", icon="INFO")
 
         # Token count estimate (heuristic: ~4 chars per token, varies for
         # non-English text and code but gives a useful order-of-magnitude)
-        message_text = props.user_message
+        message_text = _get_prompt_message(props)
         estimated_tokens = max(1, len(message_text) // 4)
         max_tokens = MODEL_TOKEN_LIMITS.get(props.model, _DEFAULT_TOKEN_LIMIT)
         input_box.label(
