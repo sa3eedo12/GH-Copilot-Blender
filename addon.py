@@ -895,6 +895,12 @@ class BlenderMCPChatProperties(bpy.types.PropertyGroup):
             ("o1", "o1", "o1"),
             ("o1-mini", "o1-mini", "o1-mini"),
             ("DeepSeek-R1", "DeepSeek-R1", "DeepSeek R1"),
+            ("claude-opus-4-5", "claude-opus-4-5", "Claude Opus 4.5"),
+            ("claude-sonnet-4-5", "claude-sonnet-4-5", "Claude Sonnet 4.5"),
+            ("claude-3-7-sonnet", "claude-3-7-sonnet", "Claude 3.7 Sonnet"),
+            ("claude-3-5-sonnet", "claude-3-5-sonnet", "Claude 3.5 Sonnet"),
+            ("claude-3-5-haiku", "claude-3-5-haiku", "Claude 3.5 Haiku"),
+            ("claude-3-opus", "claude-3-opus", "Claude 3 Opus"),
         ],
         default="gpt-4o",
     )
