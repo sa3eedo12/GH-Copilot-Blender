@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 
@@ -785,7 +786,7 @@ def _gh_poll_thread(
     while time.time() < deadline:
         time.sleep(poll_interval)
 
-        payload = json.dumps(
+        payload = urllib.parse.urlencode(
             {
                 "client_id": GH_OAUTH_CLIENT_ID,
                 "device_code": device_code,
@@ -796,7 +797,7 @@ def _gh_poll_thread(
             "https://github.com/login/oauth/access_token",
             data=payload,
             headers={
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
             },
             method="POST",
@@ -977,14 +978,14 @@ class BLENDERMCP_OT_GitHubLogin(bpy.types.Operator):
             return {"CANCELLED"}
 
         # Step 1: Request device & user codes
-        payload = json.dumps(
+        payload = urllib.parse.urlencode(
             {"client_id": GH_OAUTH_CLIENT_ID, "scope": "user"}
         ).encode("utf-8")
         req = urllib.request.Request(
             "https://github.com/login/device/code",
             data=payload,
             headers={
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
             },
             method="POST",
