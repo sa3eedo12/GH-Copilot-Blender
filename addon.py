@@ -23,7 +23,7 @@ import webbrowser
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
 # ---------------------------------------------------------------------------
 # Addon metadata
@@ -913,6 +913,15 @@ def _gh_poll_thread(
 # ---- Chat properties ------------------------------------------------------
 
 
+class ChatInputLine(bpy.types.PropertyGroup):
+    """A single line of the multi-line chat message input."""
+
+    text: StringProperty(  # type: ignore[assignment]
+        name="",
+        description="A line of your message",
+    )
+
+
 class BlenderMCPChatProperties(bpy.types.PropertyGroup):
     api_base: StringProperty(  # type: ignore[assignment]
         name="API Base URL",
@@ -952,9 +961,13 @@ class BlenderMCPChatProperties(bpy.types.PropertyGroup):
         description="System prompt sent at the start of every conversation",
         default=_DEFAULT_SYSTEM_PROMPT,
     )
-    user_message: StringProperty(  # type: ignore[assignment]
-        name="Message",
-        description="Type your message to the AI assistant",
+    input_lines: CollectionProperty(  # type: ignore[assignment]
+        name="Message Lines",
+        type=ChatInputLine,
+    )
+    active_input_line: IntProperty(  # type: ignore[assignment]
+        name="Active Line",
+        default=0,
     )
     show_settings: BoolProperty(  # type: ignore[assignment]
         name="Show Settings",
@@ -985,12 +998,19 @@ class BLENDERMCP_OT_SendChat(bpy.types.Operator):
             )
             return {"CANCELLED"}
 
-        message = props.user_message.strip()
+        # Ensure at least one input line exists
+        if not props.input_lines:
+            props.input_lines.add()
+
+        message = "\n".join(line.text for line in props.input_lines).strip()
         if not message:
             return {"CANCELLED"}
 
         _chat_messages.append({"role": "user", "content": message})
-        props.user_message = ""
+        # Clear input lines and leave one empty line ready for the next message
+        props.input_lines.clear()
+        props.input_lines.add()
+        props.active_input_line = 0
         _chat_busy = True
 
         t = threading.Thread(
@@ -1018,6 +1038,35 @@ class BLENDERMCP_OT_ClearChat(bpy.types.Operator):
 
     def execute(self, context):
         _chat_messages.clear()
+        return {"FINISHED"}
+
+
+class BLENDERMCP_OT_AddInputLine(bpy.types.Operator):
+    bl_idname = "blendermcp.add_input_line"
+    bl_label = "Add Line"
+    bl_description = "Add a new line to the message input"
+
+    def execute(self, context):
+        props = context.scene.blendermcp_chat
+        props.input_lines.add()
+        props.active_input_line = len(props.input_lines) - 1
+        return {"FINISHED"}
+
+
+class BLENDERMCP_OT_RemoveInputLine(bpy.types.Operator):
+    bl_idname = "blendermcp.remove_input_line"
+    bl_label = "Remove Line"
+    bl_description = "Remove the last line from the message input"
+
+    def execute(self, context):
+        props = context.scene.blendermcp_chat
+        if len(props.input_lines) > 1:
+            props.input_lines.remove(len(props.input_lines) - 1)
+            props.active_input_line = len(props.input_lines) - 1
+        else:
+            # Keep at least one line; just clear its text
+            if props.input_lines:
+                props.input_lines[0].text = ""
         return {"FINISHED"}
 
 
@@ -1214,13 +1263,27 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
         layout.separator()
 
         # --- Input ---
-        msg_col = layout.column(align=True)
-        msg_col.scale_y = 2.5
-        msg_col.prop(props, "user_message", text="")
+        # Ensure at least one input line exists
+        if not props.input_lines:
+            props.input_lines.add()
+
+        input_box = layout.box()
+        msg_col = input_box.column(align=True)
+        for line in props.input_lines:
+            msg_col.prop(line, "text", text="")
+
+        line_ops = layout.row(align=True)
+        line_ops.operator(
+            "blendermcp.add_input_line", icon="ADD", text="Add Line",
+        )
+        line_ops.operator(
+            "blendermcp.remove_input_line", icon="REMOVE", text="Remove Line",
+        )
 
         # Token count estimate (heuristic: ~4 chars per token, varies for
         # non-English text and code but gives a useful order-of-magnitude)
-        estimated_tokens = max(1, len(props.user_message) // 4)
+        full_message = "\n".join(line.text for line in props.input_lines)
+        estimated_tokens = max(1, len(full_message) // 4)
         max_tokens = MODEL_TOKEN_LIMITS.get(props.model, _DEFAULT_TOKEN_LIMIT)
         layout.label(
             text=f"~{estimated_tokens:,} / {max_tokens:,} tokens",
@@ -1242,11 +1305,14 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
 
 _classes = (
     BlenderMCPProperties,
+    ChatInputLine,
     BlenderMCPChatProperties,
     BLENDERMCP_OT_StartServer,
     BLENDERMCP_OT_StopServer,
     BLENDERMCP_OT_SendChat,
     BLENDERMCP_OT_ClearChat,
+    BLENDERMCP_OT_AddInputLine,
+    BLENDERMCP_OT_RemoveInputLine,
     BLENDERMCP_OT_GitHubLogin,
     BLENDERMCP_OT_GitHubLogout,
     BLENDERMCP_PT_Panel,
