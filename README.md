@@ -3,12 +3,30 @@
 Connect **GitHub Copilot** (or any MCP-capable AI client) to **Blender** through the
 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
 
-Once set up you can ask Copilot to create, modify, and inspect your Blender scene
-using natural language — directly from VS Code.
+You can interact with the AI in **two ways**:
+
+1. **Built-in AI Chat** — talk to an AI assistant directly inside Blender's
+   sidebar. No VS Code required.
+2. **VS Code + Copilot Agent Mode** — use GitHub Copilot in VS Code with the
+   MCP server bridge (the original workflow).
 
 ---
 
 ## How it works
+
+### Option A — Built-in AI Chat (recommended, no VS Code needed)
+
+```
+Blender addon  ──(HTTPS / OpenAI-compatible API)──►  AI provider
+  (addon.py)                                         (GitHub Models, OpenAI, etc.)
+```
+
+The addon includes a **AI Chat** panel in the 3D Viewport sidebar.
+You configure an API key and endpoint, then chat with the AI directly inside
+Blender.  The AI can call the same tools (scene info, object info, execute code,
+screenshot) without any external processes.
+
+### Option B — VS Code + MCP
 
 ```
 GitHub Copilot  ──(MCP / stdio)──►  blender-mcp server  ──(TCP / JSON)──►  Blender addon
@@ -25,6 +43,18 @@ GitHub Copilot  ──(MCP / stdio)──►  blender-mcp server  ──(TCP / J
 ---
 
 ## Prerequisites
+
+### Built-in AI Chat (Option A)
+
+| Tool | Version |
+|------|---------|
+| Blender | 3.0 or newer |
+| An OpenAI-compatible API key | — |
+
+Supported providers: **GitHub Models**, **OpenAI**, **Azure OpenAI**, or any
+service with an OpenAI-compatible `/chat/completions` endpoint.
+
+### VS Code + MCP (Option B)
 
 | Tool | Version |
 |------|---------|
@@ -66,7 +96,25 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 You should see *"Running on localhost:9876"* in the panel.
 
-### 3 – Configure VS Code
+> **Note:** The MCP socket server is only needed for *Option B* (VS Code).
+> The built-in AI Chat works without starting the socket server.
+
+### 3 – Built-in AI Chat (Option A)
+
+1. In the 3D Viewport sidebar (**N**), select the **BlenderMCP** tab.
+2. Expand the **AI Chat** panel.
+3. Open **API Settings** and fill in:
+   - **API Base URL** — for GitHub Models use
+     `https://models.inference.ai.azure.com`, for OpenAI use
+     `https://api.openai.com/v1`.
+   - **API Key** — your GitHub personal access token (for GitHub Models) or
+     OpenAI API key.
+   - **Model** — e.g. `gpt-4o`.
+4. Type a message in the text field and click ▶ (Send).
+5. The AI assistant can inspect your scene, create objects, run code, and take
+   screenshots — all directly inside Blender.
+
+### 4 – Configure VS Code (Option B)
 
 The repository already ships with `.vscode/mcp.json`, so VS Code will automatically
 offer to start the `blender` MCP server when you open the project folder.
@@ -90,7 +138,7 @@ If you need to configure it manually, add the following to your
 }
 ```
 
-### 4 – Use GitHub Copilot Agent Mode
+### 5 – Use GitHub Copilot Agent Mode (Option B)
 
 1. Open the **Copilot Chat** panel in VS Code (`Ctrl+Alt+I` / `⌃⌥I`).
 2. Switch to **Agent mode** (click the mode selector and choose **Agent**).
