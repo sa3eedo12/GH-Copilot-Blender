@@ -955,6 +955,7 @@ class BlenderMCPChatProperties(bpy.types.PropertyGroup):
     user_message: StringProperty(  # type: ignore[assignment]
         name="Message",
         description="Type your message to the AI assistant",
+        multiline=True,
     )
     show_settings: BoolProperty(  # type: ignore[assignment]
         name="Show Settings",
