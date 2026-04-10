@@ -18,6 +18,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+import webbrowser
 
 import bpy
 import mathutils
@@ -524,10 +525,23 @@ _CHAT_TOOL_DEFS: list[dict] = [
     },
 ]
 
+# ---- GitHub OAuth client ID ------------------------------------------------
+
+GH_OAUTH_CLIENT_ID: str = "Ov23lij4URGHUWRkizTj"
+
 # ---- Chat state (module-level) -------------------------------------------
 
 _chat_messages: list[dict] = []
 _chat_busy: bool = False
+
+# ---- GitHub OAuth Device Flow state (module-level) -----------------------
+
+_gh_device_code: str = ""
+_gh_user_code: str = ""
+_gh_verification_uri: str = ""
+_gh_auth_busy: bool = False
+_gh_auth_error: str = ""
+_gh_logged_in: bool = False
 
 
 # ---- Chat helpers ---------------------------------------------------------
@@ -610,6 +624,21 @@ def _schedule_redraw() -> None:
 def _chat_ui_refresh() -> float | None:
     """Timer callback that keeps the sidebar panel up-to-date while busy."""
     if not _chat_busy:
+        return None  # unregister
+    try:
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == "VIEW_3D":
+                    area.tag_redraw()
+    except Exception:
+        pass
+    return 0.5
+
+
+def _gh_auth_ui_refresh() -> float | None:
+    """Timer callback that keeps the panel up-to-date during GitHub auth."""
+    if not _gh_auth_busy:
+        _schedule_redraw()
         return None  # unregister
     try:
         for window in bpy.context.window_manager.windows:
@@ -738,6 +767,102 @@ def _chat_thread(
         _schedule_redraw()
 
 
+# ---- GitHub OAuth Device Flow helpers ------------------------------------
+
+
+def _gh_poll_thread(
+    device_code: str, interval: int, expires_in: int, props_scene_name: str
+) -> None:
+    """Background thread: poll GitHub for an OAuth access token."""
+    global _gh_auth_busy, _gh_auth_error, _gh_logged_in, _gh_device_code
+    global _gh_user_code, _gh_verification_uri
+
+    deadline = time.time() + expires_in
+    poll_interval = interval
+
+    ctx = ssl.create_default_context()
+
+    while time.time() < deadline:
+        time.sleep(poll_interval)
+
+        payload = json.dumps(
+            {
+                "client_id": GH_OAUTH_CLIENT_ID,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            "https://github.com/login/oauth/access_token",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            _gh_auth_error = f"Network error: {exc}"
+            _gh_auth_busy = False
+            _schedule_redraw()
+            return
+
+        if "access_token" in data:
+            token = data["access_token"]
+
+            def _store_token(_tok=token):
+                try:
+                    scene = bpy.data.scenes.get(props_scene_name)
+                    if scene is None and bpy.context.scene:
+                        scene = bpy.context.scene
+                    if scene is not None:
+                        props = scene.blendermcp_chat
+                        props.api_key = _tok
+                        if not props.api_base or props.api_base.strip() == "":
+                            props.api_base = "https://models.inference.ai.azure.com"
+                except Exception:
+                    pass
+                return None
+
+            bpy.app.timers.register(_store_token, first_interval=0.0)
+
+            global _gh_logged_in
+            _gh_logged_in = True
+            _gh_auth_busy = False
+            _gh_auth_error = ""
+            _gh_device_code = ""
+            _gh_user_code = ""
+            _gh_verification_uri = ""
+            _schedule_redraw()
+            return
+
+        error = data.get("error", "")
+        if error == "authorization_pending":
+            continue
+        elif error == "slow_down":
+            poll_interval += 5
+            continue
+        elif error == "expired_token":
+            _gh_auth_error = "Authorization code expired. Please try again."
+            break
+        elif error == "access_denied":
+            _gh_auth_error = "Access denied by user."
+            break
+        else:
+            _gh_auth_error = f"Unexpected error: {error}"
+            break
+
+    else:
+        _gh_auth_error = "Authorization timed out. Please try again."
+
+    _gh_auth_busy = False
+    _schedule_redraw()
+
+
 # ---- Chat properties ------------------------------------------------------
 
 
@@ -835,6 +960,98 @@ class BLENDERMCP_OT_ClearChat(bpy.types.Operator):
         return {"FINISHED"}
 
 
+# ---- GitHub OAuth operators -----------------------------------------------
+
+
+class BLENDERMCP_OT_GitHubLogin(bpy.types.Operator):
+    bl_idname = "blendermcp.github_login"
+    bl_label = "Sign in with GitHub"
+    bl_description = "Authenticate with GitHub to use GitHub Models without entering an API key"
+
+    def execute(self, context):
+        global _gh_auth_busy, _gh_auth_error, _gh_device_code
+        global _gh_user_code, _gh_verification_uri
+
+        if _gh_auth_busy:
+            self.report({"WARNING"}, "GitHub auth is already in progress")
+            return {"CANCELLED"}
+
+        # Step 1: Request device & user codes
+        payload = json.dumps(
+            {"client_id": GH_OAUTH_CLIENT_ID, "scope": "user"}
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            "https://github.com/login/device/code",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        ctx = ssl.create_default_context()
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            self.report({"ERROR"}, f"Failed to start GitHub auth: {exc}")
+            return {"CANCELLED"}
+
+        _gh_device_code = data.get("device_code", "")
+        _gh_user_code = data.get("user_code", "")
+        _gh_verification_uri = data.get(
+            "verification_uri", "https://github.com/login/device"
+        )
+        interval = int(data.get("interval", 5))
+        expires_in = int(data.get("expires_in", 900))
+
+        _gh_auth_busy = True
+        _gh_auth_error = ""
+
+        # Step 2: Open browser automatically
+        try:
+            webbrowser.open(_gh_verification_uri)
+        except Exception:
+            pass
+
+        # Step 3: Start background polling thread
+        scene_name = context.scene.name
+        t = threading.Thread(
+            target=_gh_poll_thread,
+            args=(_gh_device_code, interval, expires_in, scene_name),
+            daemon=True,
+        )
+        t.start()
+
+        # Keep the UI refreshing while auth is in progress
+        bpy.app.timers.register(_gh_auth_ui_refresh, first_interval=0.5)
+
+        return {"FINISHED"}
+
+
+class BLENDERMCP_OT_GitHubLogout(bpy.types.Operator):
+    bl_idname = "blendermcp.github_logout"
+    bl_label = "Sign out"
+    bl_description = "Sign out of GitHub and clear the stored token"
+
+    def execute(self, context):
+        global _gh_logged_in, _gh_auth_busy, _gh_auth_error
+        global _gh_device_code, _gh_user_code, _gh_verification_uri
+
+        _gh_logged_in = False
+        _gh_auth_busy = False
+        _gh_auth_error = ""
+        _gh_device_code = ""
+        _gh_user_code = ""
+        _gh_verification_uri = ""
+
+        # Clear the stored token
+        props = context.scene.blendermcp_chat
+        props.api_key = ""
+
+        return {"FINISHED"}
+
+
 # ---- Chat panel -----------------------------------------------------------
 
 
@@ -849,6 +1066,29 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
         layout = self.layout
         props = context.scene.blendermcp_chat
 
+        # --- GitHub Sign-in section ---
+        auth_box = layout.box()
+        if _gh_logged_in:
+            # Signed-in state
+            auth_box.label(text="\u2713 Signed in with GitHub", icon="CHECKMARK")
+            auth_box.operator("blendermcp.github_logout", icon="CANCEL")
+        elif _gh_auth_busy:
+            # Auth flow in progress
+            auth_box.label(text="Waiting for authorization\u2026", icon="SORTTIME")
+            if _gh_user_code:
+                auth_box.label(text=f"Enter code: {_gh_user_code}", icon="COPY_ID")
+            uri = _gh_verification_uri or "https://github.com/login/device"
+            auth_box.label(text=f"Visit: {uri}")
+        else:
+            # Not signed in
+            if _gh_auth_error:
+                auth_box.label(text=f"\u274c {_gh_auth_error}", icon="ERROR")
+            auth_box.operator(
+                "blendermcp.github_login", icon="URL",
+            )
+
+        layout.separator()
+
         # --- API settings (collapsible) ---
         box = layout.box()
         row = box.row()
@@ -861,7 +1101,10 @@ class BLENDERMCP_PT_ChatPanel(bpy.types.Panel):
         if props.show_settings:
             col = box.column(align=True)
             col.prop(props, "api_base")
-            col.prop(props, "api_key")
+            # De-emphasise manual key field when signed in via GitHub
+            key_row = col.row()
+            key_row.enabled = not _gh_logged_in
+            key_row.prop(props, "api_key")
             col.prop(props, "model")
 
         layout.separator()
@@ -927,6 +1170,8 @@ _classes = (
     BLENDERMCP_OT_StopServer,
     BLENDERMCP_OT_SendChat,
     BLENDERMCP_OT_ClearChat,
+    BLENDERMCP_OT_GitHubLogin,
+    BLENDERMCP_OT_GitHubLogout,
     BLENDERMCP_PT_Panel,
     BLENDERMCP_PT_ChatPanel,
 )
