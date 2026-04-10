@@ -806,7 +806,19 @@ def _gh_poll_thread(
         try:
             with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8")
+            except Exception:
+                pass
+            print(f"[BlenderMCP] GitHub token poll HTTP error {exc.code}: {body}")
+            _gh_auth_error = f"Network error: {exc} - {body[:200]}"
+            _gh_auth_busy = False
+            _schedule_redraw()
+            return
         except Exception as exc:
+            print(f"[BlenderMCP] GitHub token poll error: {exc}")
             _gh_auth_error = f"Network error: {exc}"
             _gh_auth_busy = False
             _schedule_redraw()
@@ -996,7 +1008,7 @@ class BLENDERMCP_OT_GitHubLogin(bpy.types.Operator):
 
         # Step 1: Request device & user codes
         payload = urllib.parse.urlencode(
-            {"client_id": GH_OAUTH_CLIENT_ID, "scope": "models"}
+            {"client_id": GH_OAUTH_CLIENT_ID}
         ).encode("utf-8")
         req = urllib.request.Request(
             "https://github.com/login/device/code",
@@ -1011,7 +1023,17 @@ class BLENDERMCP_OT_GitHubLogin(bpy.types.Operator):
         try:
             with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8")
+            except Exception:
+                pass
+            print(f"[BlenderMCP] GitHub auth HTTP error {exc.code}: {body}")
+            self.report({"ERROR"}, f"Failed to start GitHub auth: {exc} - {body[:200]}")
+            return {"CANCELLED"}
         except Exception as exc:
+            print(f"[BlenderMCP] GitHub auth error: {exc}")
             self.report({"ERROR"}, f"Failed to start GitHub auth: {exc}")
             return {"CANCELLED"}
 
